@@ -2,6 +2,7 @@ package com.aliangmaker.media;
 
 import android.annotation.SuppressLint;
 import android.app.Activity;
+import android.app.NotificationManager;
 import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -21,6 +22,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.provider.MediaStore;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -76,7 +78,11 @@ import tv.danmaku.ijk.media.player.IjkMediaPlayer;
 import static java.lang.Math.abs;
 import static java.lang.Math.floor;
 
+
+
 public class PlayVideoActivity extends AppCompatActivity implements View.OnClickListener {
+    private PowerManager.WakeLock wakeLock;
+    
     private ActivityPlayVideoBinding binding;
     private SharedPreferences playSet;
     private final IjkMediaPlayer ijkMediaPlayer = new IjkMediaPlayer();
@@ -98,12 +104,23 @@ public class PlayVideoActivity extends AppCompatActivity implements View.OnClick
     private boolean canSecondLockChange = true, secondLockChanged = false, firstPlay = true, canPlay = true, choose_suf, horizon = false, tapScale = false, canRestart = true;
     private boolean playDanmaku = false, danmakuPrepared = false, danmakuPlayed = false, danmakuReset = false;
     private float[] videoInfoInSQL;
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        Toast.makeText(this, "这是一个小弹窗", Toast.LENGTH_SHORT).show();
         binding = ActivityPlayVideoBinding.inflate(getLayoutInflater());
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);//沉浸播放
+//        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON); // 保持屏幕常亮
+
+
         setContentView(binding.getRoot());
+
+        // 设置Wake Lock
+        PowerManager powerManager = (PowerManager) getSystemService(POWER_SERVICE);
+        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK , "MyApp::MyWakelockTag");
+
         initScreenInfo();
         audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
         playSet = getSharedPreferences("play_set", MODE_PRIVATE);
@@ -128,6 +145,9 @@ public class PlayVideoActivity extends AppCompatActivity implements View.OnClick
     @Override
     protected void onPause() {
         super.onPause();
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
         setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED);
         if (!playSet.getBoolean("background", false)) {
             ijkMediaPlayer.pause();
@@ -140,11 +160,16 @@ public class PlayVideoActivity extends AppCompatActivity implements View.OnClick
     protected void onResume() {
         super.onResume();
         handler.postDelayed(setINVISIBLE, 2000);
+        // 当界面恢复时设置wakelock
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire(10*60*1000L /*10 minutes*/);
+        }
     }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
+
         if (playDanmaku) danmakuView.release();
         int progress = (int) ijkMediaPlayer.getCurrentPosition();
         if (progress >= duration - 3000) {
@@ -709,6 +734,12 @@ public class PlayVideoActivity extends AppCompatActivity implements View.OnClick
         binding.pvCl.initScale(binding.pvFl, videoInfoInSQL[1]);
         binding.pvTvTitle.setText(videoName);
         ijkMediaPlayer.setOnPreparedListener(iMediaPlayer -> {
+
+            // 当视频准备完成时设置wakeLock
+            if (!wakeLock.isHeld()) {
+                wakeLock.acquire(10*60*1000L /*10 minutes*/);
+            }
+
             initPlayView(ijkMediaPlayer.getVideoWidth(), ijkMediaPlayer.getVideoHeight());
             ijkMediaPlayer.setSpeed(currentSpeed);
             if(currentSpeed != 1.00) {
